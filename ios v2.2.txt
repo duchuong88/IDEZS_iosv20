@@ -1,0 +1,64 @@
+@objc func GET_INFO(result: Result) -> Void {
+        result.success = true
+
+        let keychain = KeychainSwift()
+        let cloudStore = NSUbiquitousKeyValueStore.default
+        let defaults = UserDefaults.standard
+        let key = "vn.ezsspa.deviceid"
+
+        // --- B1. Lấy từ Keychain ---
+        var deviceId = keychain.get(key)
+        if let existing = deviceId, !existing.isEmpty {
+            print("✅ Keychain: \(existing)")
+        } else {
+            // --- B2. Lấy từ identifierForVendor ---
+            if let vendorId = UIDevice.current.identifierForVendor?.uuidString, !vendorId.isEmpty {
+                print("⚠️ Dùng identifierForVendor")
+                deviceId = vendorId
+                keychain.set(vendorId, forKey: key)
+            }
+
+            // --- B3. Thử từ iCloud (đợi đồng bộ) ---
+            if deviceId == nil, FileManager.default.ubiquityIdentityToken != nil {
+                cloudStore.synchronize()
+                let cloudId = cloudStore.string(forKey: key)
+                if let cid = cloudId, !cid.isEmpty {
+                    print("🔄 Khôi phục từ iCloud: \(cid)")
+                    deviceId = cid
+                    keychain.set(cid, forKey: key)
+                }
+            }
+
+            // --- B4. Thử từ UserDefaults ---
+            if deviceId == nil, let backupId = defaults.string(forKey: key) {
+                print("📦 Khôi phục từ UserDefaults: \(backupId)")
+                deviceId = backupId
+                keychain.set(backupId, forKey: key)
+            }
+
+            // --- B5. Tạo mới nếu vẫn trống ---
+            if deviceId == nil {
+                let newId = UUID().uuidString
+                print("🆕 Tạo deviceId mới: \(newId)")
+                deviceId = newId
+                keychain.set(newId, forKey: key)
+                defaults.set(newId, forKey: key)
+                if FileManager.default.ubiquityIdentityToken != nil {
+                    cloudStore.set(newId, forKey: key)
+                    cloudStore.synchronize()
+                }
+            }
+        }
+
+        // --- Build thông tin trả về ---
+        var info = "IOS"
+        info += ",deviceId:" + (deviceId ?? "unknown")
+        info += ",systemName:" + UIDevice.current.systemName
+        info += ",systemVersion:" + UIDevice.current.systemVersion
+        info += ",localizedModel:" + UIDevice.current.localizedModel
+        info += ",model:" + UIDevice.current.model
+        info += ",name:" + UIDevice.current.name
+        result.data = JSON(info)
+
+        App21Result(result: result)
+    }
